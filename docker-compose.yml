@@ -1,0 +1,18 @@
+
+services:
+  android-emulator:
+    build: .
+    container_name: android_emulator
+    restart: always
+    ports:
+      - "5900:5900"  # VNC port
+      - "4723:4723"  # Appium port
+      - "5555:5555"  #adb port
+    environment:
+      - VNC_PASSWORD=password
+    privileged: true  # Necessary to run the Android emulator
+    volumes:
+      - /dev/kvm:/dev/kvm  # Required for Android emulator
+    tty: true
+    command: /bin/bash -c "./start_vnc.sh & ./start_emu_headed.sh && wait"
+

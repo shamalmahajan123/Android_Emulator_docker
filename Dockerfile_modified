@@ -1,0 +1,86 @@
+
+# Base image with Eclipse Temurin JDK 8
+FROM eclipse-temurin:8-jdk
+
+# Set environment variable for non-interactive installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set working directory inside the container
+WORKDIR /app
+
+# Use bash as the default shell
+SHELL ["/bin/bash", "-c"]
+
+# Update package lists and install dependencies
+RUN apt update && apt install -y \
+    curl sudo wget unzip bzip2 \
+    libdrm-dev libxkbcommon-dev libgbm-dev \
+    libasound-dev libnss3 libxcursor1 \
+    libpulse-dev libxshmfence-dev xauth xvfb \
+    x11vnc fluxbox wmctrl libdbus-glib-1-2 \
+    && apt clean && rm -rf /var/lib/apt/lists/*
+
+# Set build arguments for Android SDK and Emulator setup
+ARG ARCH="x86_64"
+ARG TARGET="google_apis_playstore"
+ARG API_LEVEL="32"
+ARG BUILD_TOOLS="33.0.2"
+ARG ANDROID_CMD="commandlinetools-linux-8092744_latest.zip"
+ARG EMULATOR_NAME="nexus"
+ARG EMULATOR_DEVICE="Nexus 6"
+
+# Set environment variables for Android SDK and paths
+ENV ANDROID_SDK_ROOT=/opt/android
+ENV PATH="$PATH:$ANDROID_SDK_ROOT/cmdline-tools/tools:$ANDROID_SDK_ROOT/cmdline-tools/tools/bin:$ANDROID_SDK_ROOT/emulator:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/build-tools/${BUILD_TOOLS}"
+ENV DISPLAY=:1
+ENV EMULATOR_NAME=$EMULATOR_NAME
+ENV DEVICE_NAME=$EMULATOR_DEVICE
+
+# Download and install Android CMD-line tools
+RUN wget --retry-connrefused --waitretry=5 --timeout=30 --tries=5 https://dl.google.com/android/repository/${ANDROID_CMD} -P /tmp && \
+    unzip -d $ANDROID_SDK_ROOT /tmp/$ANDROID_CMD && \
+    mkdir -p $ANDROID_SDK_ROOT/cmdline-tools/tools && \
+    cd $ANDROID_SDK_ROOT/cmdline-tools && \
+    mv NOTICE.txt source.properties bin lib tools/ && \
+    cd $ANDROID_SDK_ROOT/cmdline-tools/tools && ls
+
+# Accept Android SDK licenses
+RUN yes | sdkmanager --licenses
+
+# Install required Android SDK packages
+RUN yes | sdkmanager --verbose --no_https \
+    "platform-tools" \
+    "emulator" \
+    "system-images;android-${API_LEVEL};${TARGET};${ARCH}" \
+    "platforms;android-${API_LEVEL}" \
+    "build-tools;${BUILD_TOOLS}"
+
+# Create an Android Virtual Device (AVD)
+RUN echo "no" | avdmanager --verbose create avd --force --name "${EMULATOR_NAME}" --device "${EMULATOR_DEVICE}" --package "system-images;android-${API_LEVEL};${TARGET};${ARCH}"
+
+# Install Node.js and Appium
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash && \
+    apt-get install -y nodejs && \
+    npm install -g appium@1.22.3 && \
+    apt-get update && apt-get install -y dos2unix && \
+    npm cache clean && \
+    apt-get remove --purge -y npm && \
+    apt-get autoremove --purge -y && \
+    apt-get clean && \
+    rm -Rf /tmp/* && rm -Rf /var/lib/apt/lists/*
+
+# Set VNC password and create required directories
+ARG VNC_PASSWORD
+RUN mkdir -p ~/.vnc && echo "${VNC_PASSWORD}" | x11vnc -storepasswd - ~/.vnc/passwd
+
+# Copy startup scripts and set permissions
+COPY . /app
+RUN dos2unix ./start_vnc.sh ./start_appium.sh ./start_emu_headed.sh && \
+    chmod +x ./start_vnc.sh ./start_appium.sh ./start_emu_headed.sh && \
+    ls -l ./start_emu_headed.sh  # Check permissions
+
+# Expose VNC port and Appium port
+EXPOSE 5900 4723
+
+# Start emulator, VNC, and Appium server when the container runs
+CMD ["/bin/bash", "/app/start_emu_headed.sh"]
